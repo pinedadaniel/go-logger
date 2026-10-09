@@ -40,7 +40,7 @@ import (
 
 func main() {
 	// Configure once, before starting goroutines that log.
-	log.Config(log.LoggerOptions{
+	log.Config(log.Options{
 		Level:  log.InfoLevel,
 		Format: log.FormatJSON,
 	})
@@ -78,7 +78,7 @@ import (
 )
 
 func configureLogging() {
-	log.Config(log.LoggerOptions{
+	log.Config(log.Options{
 		Level:           log.DebugLevel,
 		Format:          log.FormatText,
 		TimestampFormat: time.RFC3339,
@@ -112,6 +112,33 @@ Supported levels, from most severe to most verbose, are `PanicLevel`,
 `TraceLevel`. An empty or unrecognized level uses `InfoLevel`. A configured
 level is a threshold: for example, `WarnLevel` includes warning and error
 entries, while filtering out info and debug entries.
+
+### Configure from environment variables
+
+Use `LevelFromString` and `FormatFromString` to convert environment strings
+without handling errors. Both functions match values case-insensitively, ignore
+surrounding whitespace, and accept an optional fallback. If the input and
+fallback are both invalid, they use `InfoLevel` and `FormatText`, respectively.
+
+```go
+package main
+
+import (
+	"os"
+
+	log "github.com/pinedadaniel/go-logger/pkg/log"
+)
+
+func configureLogging() {
+	level := log.LevelFromString(os.Getenv("APP_LOG_LEVEL"), log.InfoLevel)
+	format := log.FormatFromString(os.Getenv("APP_LOG_FORMAT"), log.FormatText)
+
+	log.Config(log.Options{
+		Level:  level,
+		Format: format,
+	})
+}
+```
 
 `Config` updates one logger shared by the process. Set it once during startup;
 do not reconfigure it while other goroutines are logging.

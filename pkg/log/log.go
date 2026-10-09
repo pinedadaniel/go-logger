@@ -38,9 +38,38 @@ const (
 	TraceLevel Level = "trace"
 )
 
-// LoggerOptions configures the package-wide logger.
+// LevelFromString converts a string to a supported Level.
+// Matching is case-insensitive and ignores surrounding whitespace.
+// If value is invalid, the first optional fallback is returned when valid;
+// otherwise InfoLevel is returned.
+func LevelFromString(value string, fallback ...Level) Level {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case string(PanicLevel):
+		return PanicLevel
+	case string(FatalLevel):
+		return FatalLevel
+	case string(ErrorLevel):
+		return ErrorLevel
+	case string(WarnLevel):
+		return WarnLevel
+	case string(InfoLevel):
+		return InfoLevel
+	case string(DebugLevel):
+		return DebugLevel
+	case string(TraceLevel):
+		return TraceLevel
+	}
+
+	if len(fallback) > 0 && isValidLevel(fallback[0]) {
+		return fallback[0]
+	}
+
+	return InfoLevel
+}
+
+// Options configures the package-wide logger.
 // The zero value selects info-level text output to standard output.
-type LoggerOptions struct {
+type Options struct {
 	// Level is the minimum severity to write. Unknown values use InfoLevel.
 	Level Level
 	// Format selects FormatText or FormatJSON. Unknown values use FormatText.
@@ -72,12 +101,12 @@ type LoggerOptions struct {
 }
 
 func init() {
-	Config(LoggerOptions{})
+	Config(Options{})
 }
 
 // Config replaces the package-wide logger configuration.
 // Call it during application startup, before starting goroutines that log.
-func Config(opts LoggerOptions) {
+func Config(opts Options) {
 	defaultLogger.SetLevel(getLevel(opts.Level))
 	defaultLogger.SetFormatter(getFormat(opts))
 	defaultLogger.SetOutput(os.Stdout)
@@ -103,7 +132,7 @@ func getLevel(level Level) logrus.Level {
 	return logrus.InfoLevel
 }
 
-func getFormat(opts LoggerOptions) logrus.Formatter {
+func getFormat(opts Options) logrus.Formatter {
 	tf := opts.TimestampFormat
 	if tf == "" {
 		tf = time.RFC3339
@@ -130,6 +159,43 @@ func getFormat(opts LoggerOptions) logrus.Formatter {
 			QuoteEmptyFields:          opts.QuoteEmptyFields,
 			SortingFunc:               opts.SortingFunc,
 		}
+	}
+}
+
+// FormatFromString converts a string to a supported Format.
+// Matching is case-insensitive and ignores surrounding whitespace.
+// If value is invalid, the first optional fallback is returned when valid;
+// otherwise FormatText is returned.
+func FormatFromString(value string, fallback ...Format) Format {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case string(FormatText):
+		return FormatText
+	case string(FormatJSON):
+		return FormatJSON
+	}
+
+	if len(fallback) > 0 && isValidFormat(fallback[0]) {
+		return fallback[0]
+	}
+	return FormatText
+}
+
+func isValidLevel(level Level) bool {
+	switch strings.ToLower(string(level)) {
+	case string(PanicLevel), string(FatalLevel), string(ErrorLevel),
+		string(WarnLevel), string(InfoLevel), string(DebugLevel), string(TraceLevel):
+		return true
+	default:
+		return false
+	}
+}
+
+func isValidFormat(format Format) bool {
+	switch strings.ToLower(string(format)) {
+	case string(FormatText), string(FormatJSON):
+		return true
+	default:
+		return false
 	}
 }
 

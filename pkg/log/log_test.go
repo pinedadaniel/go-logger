@@ -14,7 +14,7 @@ import (
 func captureLogs(t *testing.T, level Level) *bytes.Buffer {
 	t.Helper()
 
-	Config(LoggerOptions{
+	Config(Options{
 		Level:  level,
 		Format: FormatJSON,
 	})
@@ -22,10 +22,67 @@ func captureLogs(t *testing.T, level Level) *bytes.Buffer {
 	var output bytes.Buffer
 	defaultLogger.SetOutput(&output)
 	t.Cleanup(func() {
-		Config(LoggerOptions{})
+		Config(Options{})
 	})
 
 	return &output
+}
+
+func TestLevelFromString(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		fallback []Level
+		want     Level
+	}{
+		{"panic", "panic", nil, PanicLevel},
+		{"fatal", "fatal", nil, FatalLevel},
+		{"error", "error", nil, ErrorLevel},
+		{"warn", "warn", nil, WarnLevel},
+		{"info", "info", nil, InfoLevel},
+		{"debug", "debug", nil, DebugLevel},
+		{"trace", "trace", nil, TraceLevel},
+		{"case and spaces", "  DeBuG  ", nil, DebugLevel},
+		{"invalid uses default", "verbose", nil, InfoLevel},
+		{"empty uses default", "", nil, InfoLevel},
+		{"invalid uses fallback", "verbose", []Level{ErrorLevel}, ErrorLevel},
+		{"valid value ignores fallback", "debug", []Level{ErrorLevel}, DebugLevel},
+		{"invalid fallback uses default", "verbose", []Level{Level("verbose")}, InfoLevel},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := LevelFromString(test.input, test.fallback...); got != test.want {
+				t.Errorf("LevelFromString(%q) = %q, want %q", test.input, got, test.want)
+			}
+		})
+	}
+}
+
+func TestFormatFromString(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		fallback []Format
+		want     Format
+	}{
+		{"text", "text", nil, FormatText},
+		{"json", "json", nil, FormatJSON},
+		{"case and spaces", "  JsOn  ", nil, FormatJSON},
+		{"invalid uses default", "yaml", nil, FormatText},
+		{"empty uses default", "", nil, FormatText},
+		{"invalid uses fallback", "yaml", []Format{FormatJSON}, FormatJSON},
+		{"valid value ignores fallback", "text", []Format{FormatJSON}, FormatText},
+		{"invalid fallback uses default", "yaml", []Format{Format("yaml")}, FormatText},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := FormatFromString(test.input, test.fallback...); got != test.want {
+				t.Errorf("FormatFromString(%q) = %q, want %q", test.input, got, test.want)
+			}
+		})
+	}
 }
 
 func TestGetLevel(t *testing.T) {
@@ -55,7 +112,7 @@ func TestGetLevel(t *testing.T) {
 }
 
 func TestConfig(t *testing.T) {
-	Config(LoggerOptions{
+	Config(Options{
 		Level:  DebugLevel,
 		Format: FormatJSON,
 	})
@@ -72,14 +129,14 @@ func TestConfig(t *testing.T) {
 
 func TestGetFormat(t *testing.T) {
 	t.Run("JSON", func(t *testing.T) {
-		formatter, ok := getFormat(LoggerOptions{
+		formatter, ok := getFormat(Options{
 			Format:           Format("JSON"),
 			TimestampFormat:  "2006",
 			DisableTimestamp: true,
 			PrettyPrint:      true,
 		}).(*logrus.JSONFormatter)
 		if !ok {
-			t.Fatalf("formatter type = %T, want JSONFormatter", getFormat(LoggerOptions{Format: FormatJSON}))
+			t.Fatalf("formatter type = %T, want JSONFormatter", getFormat(Options{Format: FormatJSON}))
 		}
 		if formatter.TimestampFormat != "2006" || !formatter.DisableTimestamp || !formatter.PrettyPrint {
 			t.Errorf("JSON formatter options not applied: %+v", formatter)
@@ -87,16 +144,16 @@ func TestGetFormat(t *testing.T) {
 	})
 
 	t.Run("text defaults and options", func(t *testing.T) {
-		formatter, ok := getFormat(LoggerOptions{}).(*logrus.TextFormatter)
+		formatter, ok := getFormat(Options{}).(*logrus.TextFormatter)
 		if !ok {
-			t.Fatalf("formatter type = %T, want TextFormatter", getFormat(LoggerOptions{}))
+			t.Fatalf("formatter type = %T, want TextFormatter", getFormat(Options{}))
 		}
 		if formatter.TimestampFormat == "" || !formatter.DisableColors {
 			t.Errorf("unexpected text formatter defaults: %+v", formatter)
 		}
 
 		sortKeys := func(keys []string) {}
-		opts := LoggerOptions{
+		opts := Options{
 			Format:                    FormatText,
 			TimestampFormat:           "2006",
 			ForceColors:               true,
@@ -128,7 +185,7 @@ func TestGetFormat(t *testing.T) {
 			t.Errorf("text formatter options not applied: %+v", formatter)
 		}
 
-		defaultTimestamp := getFormat(LoggerOptions{Format: FormatText}).(*logrus.TextFormatter)
+		defaultTimestamp := getFormat(Options{Format: FormatText}).(*logrus.TextFormatter)
 		if defaultTimestamp.TimestampFormat != "2006-01-02T15:04:05Z07:00" {
 			t.Errorf("default text timestamp format = %q", defaultTimestamp.TimestampFormat)
 		}
