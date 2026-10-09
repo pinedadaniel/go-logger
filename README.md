@@ -1,15 +1,15 @@
 <div align="center">
 
-# logger-go
+# go-logger
 
 **A small, structured logging wrapper for Go applications.**
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/pinedadaniel/logger-go.svg)](https://pkg.go.dev/github.com/pinedadaniel/logger-go)
+[![Go Reference](https://pkg.go.dev/badge/github.com/pinedadaniel/go-logger.svg)](https://pkg.go.dev/github.com/pinedadaniel/go-logger)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 </div>
 
-`logger-go` provides package-level logging functions, configurable text or JSON
+`go-logger` provides package-level logging functions, configurable text or JSON
 output, and structured key-value fields. It uses Logrus internally and starts
 with a usable default configuration.
 
@@ -24,7 +24,7 @@ with a usable default configuration.
 ## Installation
 
 ```sh
-go get github.com/pinedadaniel/logger-go
+go get github.com/pinedadaniel/go-logger
 ```
 
 ## Quick start
@@ -35,7 +35,7 @@ package main
 import (
 	"errors"
 
-	log "github.com/pinedadaniel/logger-go/pkg/log"
+	log "github.com/pinedadaniel/go-logger/pkg/log"
 )
 
 func main() {
@@ -74,7 +74,7 @@ package main
 import (
 	"time"
 
-	log "github.com/pinedadaniel/logger-go/pkg/log"
+	log "github.com/pinedadaniel/go-logger/pkg/log"
 )
 
 func configureLogging() {
