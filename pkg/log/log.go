@@ -14,12 +14,16 @@ import (
 var defaultLogger = logrus.New()
 
 const (
-	// FormatTimestampLocal is the default timestamp layout for the local formatter.
-	FormatTimestampLocal = "2006-01-02 15:04:05"
+	// FormatTimestampDev is the default timestamp layout for the development formatter.
+	FormatTimestampDev = "2006/01/02 - 15:04:05"
+	// DefaultPrefix is the default signature used by the development formatter.
+	DefaultPrefix = "APP"
 	// FormatText writes human-readable text. It is the default format.
 	FormatText Format = "text"
 	// FormatJSON writes structured JSON.
 	FormatJSON Format = "json"
+	// FormatDev writes structured logs using this package's development layout.
+	FormatDev Format = "dev"
 
 	// PanicLevel writes panic-level messages only.
 	PanicLevel Level = "panic"
@@ -48,7 +52,7 @@ type Level string
 type Options struct {
 	// Level is the minimum severity to write. Unknown values use InfoLevel.
 	Level Level
-	// Format selects FormatText or FormatJSON. Unknown values use FormatText.
+	// Format selects FormatText, FormatJSON, or FormatDev. Unknown values use FormatText.
 	Format Format
 	// Formatter overrides Format and built-in formatter options when non-nil.
 	Formatter logrus.Formatter
@@ -56,23 +60,25 @@ type Options struct {
 	Text TextOptions
 	// JSON contains options used by the built-in JSON formatter.
 	JSON JSONOptions
-	// ShowKeys includes field names in local custom text output. By default,
-	// only field values are shown.
-	ShowKeys bool
-	// FieldSeparator separates fields in local custom text output. Its default
-	// is ", " when ShowKeys is false and " " when ShowKeys is true.
+	// HideKeys omits field names in development output. By default,
+	// field names are shown.
+	HideKeys bool
+	// Prefix identifies entries formatted by the development formatter. The default is
+	// DefaultPrefix.
+	Prefix string
+	// FieldSeparator separates fields in development output. Its default
+	// is " | ".
 	FieldSeparator string
-	// KeyValueSeparator separates each field key from its value in local custom
-	// text output. Its default is "=".
+	// KeyValueSeparator separates each field key from its value in development
+	// text output. Its default is four spaces.
 	KeyValueSeparator string
-	// IsLocal selects the package's custom text formatter instead of the
-	// formatter selected by Format.
-	IsLocal bool
 }
 
-// TextOptions configures the built-in text formatter.
+// TextOptions configures Logrus's built-in text formatter. TimestampFormat is
+// also used by the development formatter when FormatDev is selected.
 type TextOptions struct {
-	// TimestampFormat is a Go time layout. The default is time.RFC3339.
+	// TimestampFormat is a Go time layout. When empty, FormatDev uses
+	// FormatTimestampDev and the built-in text formatter uses time.RFC3339.
 	TimestampFormat string
 	// ForceColors enables ANSI colors even when output is not a terminal.
 	ForceColors bool
@@ -122,14 +128,15 @@ func withFormatter(opts Options) logrus.Formatter {
 	if opts.Formatter != nil {
 		return opts.Formatter
 	}
-	if opts.IsLocal {
+	if strings.EqualFold(string(opts.Format), string(FormatDev)) {
 		textOptions := opts.Text
 		if textOptions.TimestampFormat == "" {
-			textOptions.TimestampFormat = FormatTimestampLocal
+			textOptions.TimestampFormat = FormatTimestampDev
 		}
 		return &Formatter{
 			TimestampFormat:   textOptions.TimestampFormat,
-			ShowKeys:          opts.ShowKeys,
+			Prefix:            opts.Prefix,
+			HideKeys:          opts.HideKeys,
 			FieldSeparator:    opts.FieldSeparator,
 			KeyValueSeparator: opts.KeyValueSeparator,
 		}
@@ -159,14 +166,16 @@ func withLevel(level Level) logrus.Level {
 }
 
 func withFormat(opts Options) logrus.Formatter {
-	if strings.EqualFold(string(opts.Format), string(FormatJSON)) {
+	switch strings.ToLower(string(opts.Format)) {
+	case string(FormatJSON):
 		return &logrus.JSONFormatter{
 			TimestampFormat:  timestampFormat(opts.JSON.TimestampFormat),
 			DisableTimestamp: opts.JSON.DisableTimestamp,
 			PrettyPrint:      opts.JSON.PrettyPrint,
 		}
+	default:
+		return textFormatter(opts.Text)
 	}
-	return textFormatter(opts.Text)
 }
 
 func textFormatter(opts TextOptions) *logrus.TextFormatter {
@@ -202,6 +211,8 @@ func ToFormat(value string, fallback ...Format) Format {
 		return FormatText
 	case string(FormatJSON):
 		return FormatJSON
+	case string(FormatDev):
+		return FormatDev
 	}
 
 	if len(fallback) > 0 && isValidFormat(fallback[0]) {
@@ -252,30 +263,32 @@ func isValidLevel(level Level) bool {
 
 func isValidFormat(format Format) bool {
 	switch strings.ToLower(string(format)) {
-	case string(FormatText), string(FormatJSON):
+	case string(FormatText), string(FormatJSON), string(FormatDev):
 		return true
 	default:
 		return false
 	}
 }
 
-// Formatter formats entries as "[timestamp] LEVEL: message | fields".
-// It is used when Options.IsLocal is true.
+// Formatter formats development entries as
+// "[PREFIX] timestamp | LEVEL: message | fields". It is selected by FormatDev.
 type Formatter struct {
+	// Prefix identifies entries. The zero value uses DefaultPrefix.
+	Prefix string
 	// TimestampFormat is a Go time layout. The zero value uses
-	// FormatTimestampLocal.
+	// FormatTimestampDev.
 	TimestampFormat string
-	// ShowKeys includes field names alongside values.
-	ShowKeys bool
+	// HideKeys omits field names, leaving only field values.
+	HideKeys bool
 	// FieldSeparator separates formatted fields. The zero value selects a
-	// default based on ShowKeys.
+	// default of " | ".
 	FieldSeparator string
-	// KeyValueSeparator separates keys from values when ShowKeys is true.
-	// The zero value is "=".
+	// KeyValueSeparator separates keys from values when keys are shown.
+	// The zero value is four spaces.
 	KeyValueSeparator string
 }
 
-// Format formats one log entry using the local text layout.
+// Format formats one log entry using the development text layout.
 func (f *Formatter) Format(entry *logrus.Entry) ([]byte, error) {
 	var b *bytes.Buffer
 	if entry.Buffer != nil {
@@ -284,8 +297,22 @@ func (f *Formatter) Format(entry *logrus.Entry) ([]byte, error) {
 		b = &bytes.Buffer{}
 	}
 
-	fmt.Fprintf(b, "[%s] ", entry.Time.Format(timestampFormat(f.TimestampFormat)))
-	fmt.Fprintf(b, "%s: %s", strings.ToUpper(entry.Level.String()), entry.Message)
+	prefix := f.Prefix
+	if prefix == "" {
+		prefix = DefaultPrefix
+	}
+	layout := f.TimestampFormat
+	if layout == "" {
+		layout = FormatTimestampDev
+	}
+	fmt.Fprintf(
+		b,
+		"[%s] %s | %s: %s",
+		prefix,
+		entry.Time.Format(layout),
+		strings.ToUpper(entry.Level.String()),
+		entry.Message,
+	)
 
 	if len(entry.Data) == 0 {
 		b.WriteByte('\n')
@@ -301,7 +328,7 @@ func (f *Formatter) Format(entry *logrus.Entry) ([]byte, error) {
 	fields := make([]string, 0, len(keys))
 	for _, key := range keys {
 		value := fmt.Sprint(entry.Data[key])
-		if f.ShowKeys {
+		if !f.HideKeys {
 			fields = append(fields, key+f.keyValueSeparator()+value)
 		} else {
 			fields = append(fields, value)
@@ -318,17 +345,14 @@ func (f *Formatter) fieldSeparator() string {
 	if f.FieldSeparator != "" {
 		return f.FieldSeparator
 	}
-	if f.ShowKeys {
-		return " "
-	}
-	return ", "
+	return " | "
 }
 
 func (f *Formatter) keyValueSeparator() string {
 	if f.KeyValueSeparator != "" {
 		return f.KeyValueSeparator
 	}
-	return "="
+	return "    "
 }
 
 // Attribute is a structured key-value pair attached to a log entry.
@@ -349,145 +373,121 @@ func Field(key string, value any) Attribute {
 	return Attribute{Key: key, Value: value}
 }
 
-// Info logs msg and its structured fields at info level.
 // Info logs a message and its structured fields at info level.
 func Info(msg string, fields ...Attribute) {
 	defaultLogger.WithFields(toLogrusFields(fields)).Info(msg)
 }
 
 // Infof logs a formatted message at info level.
-// Infof logs a formatted message at info level.
 func Infof(format string, args ...any) {
 	defaultLogger.Infof(format, args...)
 }
 
-// Infoln logs the arguments at info level, separated by spaces.
 // Infoln logs arguments separated by spaces at info level.
 func Infoln(args ...any) {
 	defaultLogger.Infoln(args...)
 }
 
-// Error logs msg and its structured fields at error level.
 // Error logs a message and its structured fields at error level.
 func Error(msg string, fields ...Attribute) {
 	defaultLogger.WithFields(toLogrusFields(fields)).Error(msg)
 }
 
 // Errorf logs a formatted message at error level.
-// Errorf logs a formatted message at error level.
 func Errorf(format string, args ...any) {
 	defaultLogger.Errorf(format, args...)
 }
 
-// Errorln logs the arguments at error level, separated by spaces.
 // Errorln logs arguments separated by spaces at error level.
 func Errorln(args ...any) {
 	defaultLogger.Errorln(args...)
 }
 
-// Trace logs msg and its structured fields at trace level.
 // Trace logs a message and its structured fields at trace level.
 func Trace(msg string, fields ...Attribute) {
 	defaultLogger.WithFields(toLogrusFields(fields)).Trace(msg)
 }
 
 // Tracef logs a formatted message at trace level.
-// Tracef logs a formatted message at trace level.
 func Tracef(format string, args ...any) {
 	defaultLogger.Tracef(format, args...)
 }
 
-// Traceln logs the arguments at trace level, separated by spaces.
 // Traceln logs arguments separated by spaces at trace level.
 func Traceln(args ...any) {
 	defaultLogger.Traceln(args...)
 }
 
-// Panic logs msg and its structured fields at panic level, then panics.
 // Panic logs a message and its structured fields at panic level, then panics.
 func Panic(msg string, fields ...Attribute) {
 	defaultLogger.WithFields(toLogrusFields(fields)).Panic(msg)
 }
 
 // Panicf logs a formatted message at panic level, then panics.
-// Panicf logs a formatted message at panic level, then panics.
 func Panicf(format string, args ...any) {
 	defaultLogger.Panicf(format, args...)
 }
 
-// Panicln logs the arguments at panic level, separated by spaces, then panics.
 // Panicln logs arguments separated by spaces at panic level, then panics.
 func Panicln(args ...any) {
 	defaultLogger.Panicln(args...)
 }
 
-// Debug logs msg and its structured fields at debug level.
 // Debug logs a message and its structured fields at debug level.
 func Debug(msg string, fields ...Attribute) {
 	defaultLogger.WithFields(toLogrusFields(fields)).Debug(msg)
 }
 
 // Debugf logs a formatted message at debug level.
-// Debugf logs a formatted message at debug level.
 func Debugf(format string, args ...any) {
 	defaultLogger.Debugf(format, args...)
 }
 
-// Debugln logs the arguments at debug level, separated by spaces.
 // Debugln logs arguments separated by spaces at debug level.
 func Debugln(args ...any) {
 	defaultLogger.Debugln(args...)
 }
 
-// Print logs msg and its structured fields at info level.
 // Print logs a message and its structured fields at info level.
 func Print(msg string, fields ...Attribute) {
 	defaultLogger.WithFields(toLogrusFields(fields)).Print(msg)
 }
 
 // Printf logs a formatted message at info level.
-// Printf logs a formatted message at info level.
 func Printf(format string, args ...any) {
 	defaultLogger.Printf(format, args...)
 }
 
-// Println logs the arguments at info level, separated by spaces.
 // Println logs arguments separated by spaces at info level.
 func Println(args ...any) {
 	defaultLogger.Println(args...)
 }
 
-// Warn logs msg and its structured fields at warning level.
 // Warn logs a message and its structured fields at warning level.
 func Warn(msg string, fields ...Attribute) {
 	defaultLogger.WithFields(toLogrusFields(fields)).Warn(msg)
 }
 
 // Warnf logs a formatted message at warning level.
-// Warnf logs a formatted message at warning level.
 func Warnf(format string, args ...any) {
 	defaultLogger.Warnf(format, args...)
 }
 
-// Warnln logs the arguments at warning level, separated by spaces.
 // Warnln logs arguments separated by spaces at warning level.
 func Warnln(args ...any) {
 	defaultLogger.Warnln(args...)
 }
 
-// Fatal logs msg and its structured fields at fatal level, then exits the process.
 // Fatal logs a message and its structured fields at fatal level, then exits.
 func Fatal(msg string, fields ...Attribute) {
 	defaultLogger.WithFields(toLogrusFields(fields)).Fatal(msg)
 }
 
-// Fatalf logs a formatted message at fatal level, then exits the process.
 // Fatalf logs a formatted message at fatal level, then exits.
 func Fatalf(format string, args ...any) {
 	defaultLogger.Fatalf(format, args...)
 }
 
-// Fatalln logs the arguments at fatal level, separated by spaces, then exits the process.
 // Fatalln logs arguments separated by spaces at fatal level, then exits.
 func Fatalln(args ...any) {
 	defaultLogger.Fatalln(args...)

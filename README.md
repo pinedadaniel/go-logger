@@ -9,14 +9,16 @@
 
 </div>
 
-`go-logger` provides package-level logging functions, configurable text or JSON
-output, and structured key-value fields. It uses Logrus internally and starts
-with a usable default configuration.
+`go-logger` provides package-level logging functions, configurable text, JSON,
+or development output, and structured key-value fields. It uses Logrus
+internally and starts with a usable default configuration.
 
 ## Features
 
 - Log immediately with a package-wide logger.
 - Configure severity and text or JSON output at application startup.
+- Choose Logrus's text/JSON formatters or the wrapper's structured development
+  formatter.
 - Attach structured fields to log entries.
 - Use plain, formatted (`f`), or space-separated (`ln`) message methods.
 - Choose from trace, debug, info, warn, error, panic, and fatal levels.
@@ -95,49 +97,54 @@ func configureLogging() {
 | Option | Default | Description |
 | --- | --- | --- |
 | `Level` | `InfoLevel` | Minimum severity to log. |
-| `Format` | `FormatText` | `FormatText` or `FormatJSON`. Unknown values use text. |
+| `Format` | `FormatText` | `FormatText`, `FormatJSON`, or `FormatDev`. Unknown values use text. |
 | `Formatter` | `nil` | Optional custom Logrus formatter; takes precedence over `Format`. |
 | `Text` | zero value | Options for the built-in text formatter. |
 | `JSON` | zero value | Options for the built-in JSON formatter. |
-| `IsLocal` | `false` | Use the package's custom text formatter instead of the built-in formatter selected by `Format`. |
-| `ShowKeys` | `false` | Include field names in local custom text output. By default, only field values are shown. |
-| `FieldSeparator` | `", "` or `" "` | Separator between local fields; default is `", "` when keys are hidden and `" "` when shown. |
-| `KeyValueSeparator` | `"="` | Separator between a local custom formatter key and value. |
+| `Prefix` | `"APP"` | Signature in development output, printed in brackets before the timestamp. |
+| `HideKeys` | `false` | Omit field names in development output. By default, keys are shown. |
+| `FieldSeparator` | `" \| "` | Separator between fields in development output. |
+| `KeyValueSeparator` | four spaces | Separator between a development formatter key and value. |
 
-`TextOptions` groups text-only settings: `TimestampFormat`, `ForceColors`,
-`EnableColors`, `ForceQuote`, `DisableQuote`, `EnvironmentOverrideColors`,
-`DisableTimestamp`, `FullTimestamp`, `DisableSorting`, `QuoteEmptyFields`,
-and `SortingFunc`. `JSONOptions` provides `TimestampFormat`, `DisableTimestamp`,
-and `PrettyPrint`. The local package formatter uses `Text.TimestampFormat` and
-the top-level `ShowKeys`, `FieldSeparator`, and `KeyValueSeparator`; other text
-options apply only to Logrus's built-in text formatter.
+`TextOptions` groups settings for Logrus's text formatter and the timestamp
+layout shared with `FormatDev`: `TimestampFormat`, `ForceColors`, `EnableColors`,
+`ForceQuote`, `DisableQuote`, `EnvironmentOverrideColors`, `DisableTimestamp`,
+`FullTimestamp`, `DisableSorting`, `QuoteEmptyFields`, and `SortingFunc`.
+`JSONOptions` provides `TimestampFormat`, `DisableTimestamp`, and `PrettyPrint`.
+`FormatDev` selects the package's structured development
+formatter, which uses `Text.TimestampFormat` and the top-level `Prefix`,
+`HideKeys`, `FieldSeparator`, and `KeyValueSeparator`; other text options apply
+only to Logrus's built-in text formatter. If `Text.TimestampFormat` is empty,
+the development formatter uses `2006/01/02 - 15:04:05`; text and JSON use
+RFC3339 by default.
 
-If `Formatter` is non-nil, it is used as-is and the built-in `Format`, `Text`,
-and `JSON` settings are ignored. Otherwise, `IsLocal` selects the package's
-custom text formatter. With the default `ShowKeys: false`, fields are values
-only:
+If `Formatter` is non-nil, it is used as-is and the format-specific options are
+ignored. Otherwise, `FormatDev` selects the package's structured development
+formatter. Its default prefix is `APP`; set `Prefix` to identify the service.
+By default, keys are shown with four spaces between key and value, and fields
+are separated by ` | `:
 
 ```text
-[2025-01-02 03:04:05] INFO: request completed | 1024, 127.0.0.1, SUCCESS
+[APP] 2025/01/02 - 03:04:05 | INFO: request completed | id    1024 | ip    127.0.0.1 | status    SUCCESS
 ```
 
-Setting `ShowKeys: true` includes keys:
+Set `HideKeys: true` to show only values:
 
 ```text
-[2025-01-02 03:04:05] INFO: request completed | id=1024 ip=127.0.0.1 status=SUCCESS
+[APP] 2025/01/02 - 03:04:05 | INFO: request completed | 1024 | 127.0.0.1 | SUCCESS
 ```
 
-The local formatter also allows customizing both separators:
+The development formatter allows customizing both separators:
 
 ```go
 log.Config(log.Options{
 	Level:             log.InfoLevel,
-	IsLocal:           true,
-	ShowKeys:          true,
+	Format:            log.FormatDev,
+	Prefix:            "API",
 	FieldSeparator:     ", ",
 	KeyValueSeparator: ": ",
 	Text: log.TextOptions{
-		TimestampFormat: "2006-01-02 15:04:05",
+		TimestampFormat: "2006/01/02 - 15:04:05",
 	},
 })
 
@@ -146,11 +153,11 @@ log.Info("request completed",
 	log.Field("ip", "127.0.0.1"),
 	log.Field("status", "SUCCESS"),
 )
-// [2025-01-02 03:04:05] INFO: request completed | id: 1024, ip: 127.0.0.1, status: SUCCESS
+// [API] 2025/01/02 - 03:04:05 | INFO: request completed | id: 1024, ip: 127.0.0.1, status: SUCCESS
 ```
 
-Non-local configuration selects Logrus's text or JSON formatter according to
-`Format`.
+`FormatText` and `FormatJSON` select Logrus's built-in text and JSON formatters;
+`FormatDev` selects this wrapper's structured development formatter.
 
 Supported levels, from most severe to most verbose, are `PanicLevel`,
 `FatalLevel`, `ErrorLevel`, `WarnLevel`, `InfoLevel`, `DebugLevel`, and
@@ -161,9 +168,10 @@ entries, while filtering out info and debug entries.
 ### Configure from environment variables
 
 Use `ToLevel` and `ToFormat` to convert environment strings without handling
-errors. Both functions match values case-insensitively, ignore
-surrounding whitespace, and accept an optional fallback. If the input and
-fallback are both invalid, they use `InfoLevel` and `FormatText`, respectively.
+errors. Both functions match values case-insensitively, ignore surrounding
+whitespace, and accept an optional fallback. `ToFormat` recognizes `text`,
+`json`, and `dev`. If the input and fallback are both invalid, they use
+`InfoLevel` and `FormatText`, respectively.
 
 ```go
 package main
