@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sirupsen/logrus"
 )
@@ -52,7 +53,7 @@ func TestLevelFromString(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if got := LevelFromString(test.input, test.fallback...); got != test.want {
+			if got := ToLevel(test.input, test.fallback...); got != test.want {
 				t.Errorf("LevelFromString(%q) = %q, want %q", test.input, got, test.want)
 			}
 		})
@@ -78,7 +79,7 @@ func TestFormatFromString(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if got := FormatFromString(test.input, test.fallback...); got != test.want {
+			if got := ToFormat(test.input, test.fallback...); got != test.want {
 				t.Errorf("FormatFromString(%q) = %q, want %q", test.input, got, test.want)
 			}
 		})
@@ -104,7 +105,7 @@ func TestGetLevel(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(string(test.input), func(t *testing.T) {
-			if got := getLevel(test.input); got != test.want {
+			if got := withLevel(test.input); got != test.want {
 				t.Errorf("getLevel(%q) = %v, want %v", test.input, got, test.want)
 			}
 		})
@@ -129,14 +130,16 @@ func TestConfig(t *testing.T) {
 
 func TestGetFormat(t *testing.T) {
 	t.Run("JSON", func(t *testing.T) {
-		formatter, ok := getFormat(Options{
-			Format:           Format("JSON"),
-			TimestampFormat:  "2006",
-			DisableTimestamp: true,
-			PrettyPrint:      true,
+		formatter, ok := withFormat(Options{
+			Format: Format("JSON"),
+			JSON: JSONOptions{
+				TimestampFormat:  "2006",
+				DisableTimestamp: true,
+				PrettyPrint:      true,
+			},
 		}).(*logrus.JSONFormatter)
 		if !ok {
-			t.Fatalf("formatter type = %T, want JSONFormatter", getFormat(Options{Format: FormatJSON}))
+			t.Fatalf("formatter type = %T, want JSONFormatter", withFormat(Options{Format: FormatJSON}))
 		}
 		if formatter.TimestampFormat != "2006" || !formatter.DisableTimestamp || !formatter.PrettyPrint {
 			t.Errorf("JSON formatter options not applied: %+v", formatter)
@@ -144,9 +147,9 @@ func TestGetFormat(t *testing.T) {
 	})
 
 	t.Run("text defaults and options", func(t *testing.T) {
-		formatter, ok := getFormat(Options{}).(*logrus.TextFormatter)
+		formatter, ok := withFormat(Options{}).(*logrus.TextFormatter)
 		if !ok {
-			t.Fatalf("formatter type = %T, want TextFormatter", getFormat(Options{}))
+			t.Fatalf("formatter type = %T, want TextFormatter", withFormat(Options{}))
 		}
 		if formatter.TimestampFormat == "" || !formatter.DisableColors {
 			t.Errorf("unexpected text formatter defaults: %+v", formatter)
@@ -154,24 +157,26 @@ func TestGetFormat(t *testing.T) {
 
 		sortKeys := func(keys []string) {}
 		opts := Options{
-			Format:                    FormatText,
-			TimestampFormat:           "2006",
-			ForceColors:               true,
-			EnableColors:              true,
-			ForceQuote:                true,
-			DisableQuote:              true,
-			EnvironmentOverrideColors: true,
-			DisableTimestamp:          true,
-			FullTimestamp:             true,
-			DisableSorting:            true,
-			QuoteEmptyFields:          true,
-			SortingFunc:               sortKeys,
+			Format: FormatText,
+			Text: TextOptions{
+				TimestampFormat:           "2006",
+				ForceColors:               true,
+				EnableColors:              true,
+				ForceQuote:                true,
+				DisableQuote:              true,
+				EnvironmentOverrideColors: true,
+				DisableTimestamp:          true,
+				FullTimestamp:             true,
+				DisableSorting:            true,
+				QuoteEmptyFields:          true,
+				SortingFunc:               sortKeys,
+			},
 		}
-		formatter, ok = getFormat(opts).(*logrus.TextFormatter)
+		formatter, ok = withFormat(opts).(*logrus.TextFormatter)
 		if !ok {
-			t.Fatalf("formatter type = %T, want TextFormatter", getFormat(opts))
+			t.Fatalf("formatter type = %T, want TextFormatter", withFormat(opts))
 		}
-		if formatter.TimestampFormat != opts.TimestampFormat ||
+		if formatter.TimestampFormat != opts.Text.TimestampFormat ||
 			!formatter.ForceColors ||
 			formatter.DisableColors ||
 			!formatter.ForceQuote ||
@@ -185,11 +190,156 @@ func TestGetFormat(t *testing.T) {
 			t.Errorf("text formatter options not applied: %+v", formatter)
 		}
 
-		defaultTimestamp := getFormat(Options{Format: FormatText}).(*logrus.TextFormatter)
+		defaultTimestamp := withFormat(Options{Format: FormatText}).(*logrus.TextFormatter)
 		if defaultTimestamp.TimestampFormat != "2006-01-02T15:04:05Z07:00" {
 			t.Errorf("default text timestamp format = %q", defaultTimestamp.TimestampFormat)
 		}
 	})
+}
+
+func TestNestedFormatterOptions(t *testing.T) {
+	t.Run("JSON options", func(t *testing.T) {
+		got, ok := withFormat(Options{
+			Format: FormatJSON,
+			JSON: JSONOptions{
+				TimestampFormat:  "2006",
+				DisableTimestamp: true,
+				PrettyPrint:      true,
+			},
+		}).(*logrus.JSONFormatter)
+		if !ok {
+			t.Fatalf("formatter type = %T, want JSONFormatter", withFormat(Options{Format: FormatJSON}))
+		}
+		if got.TimestampFormat != "2006" || !got.DisableTimestamp || !got.PrettyPrint {
+			t.Errorf("nested JSON options not applied: %+v", got)
+		}
+	})
+
+	t.Run("text options", func(t *testing.T) {
+		got, ok := withFormat(Options{
+			Format: FormatText,
+			Text: TextOptions{
+				TimestampFormat: "2006",
+				EnableColors:    true,
+				FullTimestamp:   true,
+			},
+		}).(*logrus.TextFormatter)
+		if !ok {
+			t.Fatalf("formatter type = %T, want TextFormatter", withFormat(Options{Format: FormatText}))
+		}
+		if got.TimestampFormat != "2006" || got.DisableColors || !got.FullTimestamp {
+			t.Errorf("nested text options not applied: %+v", got)
+		}
+	})
+}
+
+func TestCustomFormatterOverridesBuiltIn(t *testing.T) {
+	custom := &logrus.JSONFormatter{PrettyPrint: true}
+	got := withFormatter(Options{
+		Format:    FormatText,
+		Formatter: custom,
+		ShowKeys:  true,
+	})
+	if got != custom {
+		t.Errorf("formatter = %T, want provided custom formatter", got)
+	}
+}
+
+func TestWithFormatterUsesBuiltInFormatterUnlessLocal(t *testing.T) {
+	tests := []struct {
+		name     string
+		format   Format
+		wantJSON bool
+	}{
+		{"text", FormatText, false},
+		{"json", FormatJSON, true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := withFormatter(Options{Format: test.format})
+			if test.wantJSON {
+				if _, ok := got.(*logrus.JSONFormatter); !ok {
+					t.Errorf("formatter type = %T, want JSONFormatter", got)
+				}
+			} else {
+				if _, ok := got.(*logrus.TextFormatter); !ok {
+					t.Errorf("formatter type = %T, want TextFormatter", got)
+				}
+			}
+		})
+	}
+
+	local := withFormatter(Options{Format: FormatJSON, IsLocal: true})
+	if _, ok := local.(*Formatter); !ok {
+		t.Errorf("local formatter type = %T, want custom Formatter", local)
+	}
+}
+
+func TestLocalFormatterOutputAndSeparators(t *testing.T) {
+	opts := Options{
+		Format:  FormatText,
+		IsLocal: true,
+		Text: TextOptions{
+			TimestampFormat: "2006-01-02 15:04:05",
+		},
+	}
+	entry := logrus.NewEntry(logrus.New())
+	entry.Time = time.Date(2025, 1, 2, 3, 4, 5, 0, time.UTC)
+	entry.Level = logrus.InfoLevel
+	entry.Message = "request completed"
+	entry.Data = logrus.Fields{
+		"z": "two words",
+		"a": "first",
+	}
+
+	output, err := withFormatter(opts).Format(entry)
+	if err != nil {
+		t.Fatalf("Format() error = %v", err)
+	}
+	got := string(output)
+	want := `[2025-01-02 03:04:05] INFO: request completed | first, two words` + "\n"
+	if got != want {
+		t.Errorf("default ShowKeys output = %q, want %q", got, want)
+	}
+
+	opts.ShowKeys = true
+	output, err = withFormatter(opts).Format(entry)
+	if err != nil {
+		t.Fatalf("Format() with ShowKeys error = %v", err)
+	}
+	want = `[2025-01-02 03:04:05] INFO: request completed | a=first z=two words` + "\n"
+	if got = string(output); got != want {
+		t.Errorf("keyed output = %q, want %q", got, want)
+	}
+
+	opts.FieldSeparator = "; "
+	opts.KeyValueSeparator = " -> "
+	output, err = withFormatter(opts).Format(entry)
+	if err != nil {
+		t.Fatalf("Format() with custom separators error = %v", err)
+	}
+	want = `[2025-01-02 03:04:05] INFO: request completed | a -> first; z -> two words` + "\n"
+	if got = string(output); got != want {
+		t.Errorf("custom separator output = %q, want %q", got, want)
+	}
+
+	opts.ShowKeys = false
+	output, err = withFormatter(opts).Format(entry)
+	if err != nil {
+		t.Fatalf("Format() with custom field separator error = %v", err)
+	}
+	want = `[2025-01-02 03:04:05] INFO: request completed | first; two words` + "\n"
+	if got = string(output); got != want {
+		t.Errorf("custom values separator output = %q, want %q", got, want)
+	}
+}
+
+func TestLocalFormatterUsesDefaultTimestampLayout(t *testing.T) {
+	got := withFormatter(Options{IsLocal: true}).(*Formatter)
+	if got.TimestampFormat != FormatTimestampLocal {
+		t.Errorf("local timestamp format = %q, want %q", got.TimestampFormat, FormatTimestampLocal)
+	}
 }
 
 func TestFieldHelpersAndConversion(t *testing.T) {

@@ -79,11 +79,13 @@ import (
 
 func configureLogging() {
 	log.Config(log.Options{
-		Level:           log.DebugLevel,
-		Format:          log.FormatText,
-		TimestampFormat: time.RFC3339,
-		FullTimestamp:   true,
-		EnableColors:    true,
+		Level:  log.DebugLevel,
+		Format: log.FormatText,
+		Text: log.TextOptions{
+			TimestampFormat: time.RFC3339,
+			FullTimestamp:   true,
+			EnableColors:    true,
+		},
 	})
 }
 ```
@@ -94,18 +96,61 @@ func configureLogging() {
 | --- | --- | --- |
 | `Level` | `InfoLevel` | Minimum severity to log. |
 | `Format` | `FormatText` | `FormatText` or `FormatJSON`. Unknown values use text. |
-| `TimestampFormat` | `time.RFC3339` | Go time layout used for timestamps. |
-| `ForceColors` | `false` | Force ANSI colors even when output is not a terminal. |
-| `EnableColors` | `false` | Enable colors in text output when supported. |
-| `ForceQuote` | `false` | Quote all text field values. |
-| `DisableQuote` | `false` | Disable quoting text field values unless `ForceQuote` is enabled. |
-| `EnvironmentOverrideColors` | `false` | Let `CLICOLOR` and `CLICOLOR_FORCE` control text colors. |
-| `DisableTimestamp` | `false` | Omit timestamps. |
-| `FullTimestamp` | `false` | Show a full timestamp in text output. |
-| `DisableSorting` | `false` | Disable sorting of text fields. |
-| `QuoteEmptyFields` | `false` | Quote empty text field values. |
-| `PrettyPrint` | `false` | Indent JSON output for readability. |
-| `SortingFunc` | default | Custom text-field key sorting function. |
+| `Formatter` | `nil` | Optional custom Logrus formatter; takes precedence over `Format`. |
+| `Text` | zero value | Options for the built-in text formatter. |
+| `JSON` | zero value | Options for the built-in JSON formatter. |
+| `IsLocal` | `false` | Use the package's custom text formatter instead of the built-in formatter selected by `Format`. |
+| `ShowKeys` | `false` | Include field names in local custom text output. By default, only field values are shown. |
+| `FieldSeparator` | `", "` or `" "` | Separator between local fields; default is `", "` when keys are hidden and `" "` when shown. |
+| `KeyValueSeparator` | `"="` | Separator between a local custom formatter key and value. |
+
+`TextOptions` groups text-only settings: `TimestampFormat`, `ForceColors`,
+`EnableColors`, `ForceQuote`, `DisableQuote`, `EnvironmentOverrideColors`,
+`DisableTimestamp`, `FullTimestamp`, `DisableSorting`, `QuoteEmptyFields`,
+and `SortingFunc`. `JSONOptions` provides `TimestampFormat`, `DisableTimestamp`,
+and `PrettyPrint`. The local package formatter uses `Text.TimestampFormat` and
+the top-level `ShowKeys`, `FieldSeparator`, and `KeyValueSeparator`; other text
+options apply only to Logrus's built-in text formatter.
+
+If `Formatter` is non-nil, it is used as-is and the built-in `Format`, `Text`,
+and `JSON` settings are ignored. Otherwise, `IsLocal` selects the package's
+custom text formatter. With the default `ShowKeys: false`, fields are values
+only:
+
+```text
+[2025-01-02 03:04:05] INFO: request completed | 1024, 127.0.0.1, SUCCESS
+```
+
+Setting `ShowKeys: true` includes keys:
+
+```text
+[2025-01-02 03:04:05] INFO: request completed | id=1024 ip=127.0.0.1 status=SUCCESS
+```
+
+The local formatter also allows customizing both separators:
+
+```go
+log.Config(log.Options{
+	Level:             log.InfoLevel,
+	IsLocal:           true,
+	ShowKeys:          true,
+	FieldSeparator:     ", ",
+	KeyValueSeparator: ": ",
+	Text: log.TextOptions{
+		TimestampFormat: "2006-01-02 15:04:05",
+	},
+})
+
+log.Info("request completed",
+	log.Field("id", 1024),
+	log.Field("ip", "127.0.0.1"),
+	log.Field("status", "SUCCESS"),
+)
+// [2025-01-02 03:04:05] INFO: request completed | id: 1024, ip: 127.0.0.1, status: SUCCESS
+```
+
+Non-local configuration selects Logrus's text or JSON formatter according to
+`Format`.
 
 Supported levels, from most severe to most verbose, are `PanicLevel`,
 `FatalLevel`, `ErrorLevel`, `WarnLevel`, `InfoLevel`, `DebugLevel`, and
@@ -115,8 +160,8 @@ entries, while filtering out info and debug entries.
 
 ### Configure from environment variables
 
-Use `LevelFromString` and `FormatFromString` to convert environment strings
-without handling errors. Both functions match values case-insensitively, ignore
+Use `ToLevel` and `ToFormat` to convert environment strings without handling
+errors. Both functions match values case-insensitively, ignore
 surrounding whitespace, and accept an optional fallback. If the input and
 fallback are both invalid, they use `InfoLevel` and `FormatText`, respectively.
 
@@ -130,8 +175,8 @@ import (
 )
 
 func configureLogging() {
-	level := log.LevelFromString(os.Getenv("APP_LOG_LEVEL"), log.InfoLevel)
-	format := log.FormatFromString(os.Getenv("APP_LOG_FORMAT"), log.FormatText)
+	level := log.ToLevel(os.Getenv("APP_LOG_LEVEL"), log.InfoLevel)
+	format := log.ToFormat(os.Getenv("APP_LOG_FORMAT"), log.FormatText)
 
 	log.Config(log.Options{
 		Level:  level,
